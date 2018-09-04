@@ -1,7 +1,7 @@
 
 from setuptools import setup
 
-#get version from version file
+# get version from version file
 
 with open('VERSION', 'r') as version_file:
     version = version_file.read().strip()
@@ -16,7 +16,7 @@ config = {
     'version': version,
     'install_requires': ['wxPython', 'scipy', 'Pillow'],
     'packages': ['puzzlesolve'],
-    'name': 'projectname'
+    'name': 'PuzzleSolve'
 }
 
 setup(**config)
