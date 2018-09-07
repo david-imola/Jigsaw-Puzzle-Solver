@@ -1,32 +1,34 @@
 from PIL import Image
 import numpy as np
-
-
-
+from enum import Enum
 
 
 def _addRandomNoise(array):
-    np.random.seed(0) # We actually want consistent noise
+    np.random.seed(0)  # We actually want consistent noise
     noisey = np.random.randint(0, 2, size=(3, 9))
     return np.concatenate(array, noisey)
 
-def _compatMeasure(gradArray):
+
+def _getInverseMeanAndCovariance(gradArray):
+    mean = np.mean(gradArray, axis=0)
     noiseyGrad = _addRandomNoise(gradArray)
-    mean = np.mean(noiseyArray, axis=0)
+    covInv = np.linalg.inv(np.cov(noiseyGrad))
+    return (mean, covInv)
 
-    covInv = np.linalg(np.cov(noiseyGrad))
 
+def _compatMeasure(grad, mean, covInv):
     score = 0
-    P = noiseyArray.shape[0]
+    P = leftArray.shape[0]
     for p in range(P):
         deviation = np.subtract(np.transpose(noiseyGrad), mean)
         term = np.matmul(deviation, covInv)
         score += np.matmul(term, deviation)
-
     return score
 
 
-
+def _symetricCompatMeasure(leftColumn, rightColumn):
+    (leftMean, leftInvvariance) = _getInverseMeanAndCovariance(leftColumn)
+    (rightMean,)
 
 class _Piece:
     def __init__(self, imgArray, i, j, pieceLen):
@@ -34,30 +36,36 @@ class _Piece:
         x0, y0 = j * pieceLen, i * pieceLen
         x1, y1 = x0 + pieceLen, y0 + pieceLen
         pieceArray = imgArray[x0:x1, y0:y1]
-        self.grad = []  # 0 for top, 1 for right, 2 for bottom, 3 for left
-        self.grad[0] = np.subtract(pieceArray[:, 1], pieceArray[:, 0])
-        self.grad[1] = np.subtract(pieceArray[:, pieceLen - 2],
+         # 0 for top, 1 for right, 2 for bottom, 3 for left
+        left = np.subtract(pieceArray[:, 1], pieceArray[:, 0])
+        right = np.subtract(pieceArray[:, pieceLen - 2],
                                   pieceArray[:, pieceLen - 1])
-        self.grad[2] = np.subtract(pieceArray[pieceArray - 2, :],
+        bottom = np.subtract(pieceArray[pieceArray - 2, :],
                                    pieceArray[pieceArray - 1, :])
-        self.grad[3] = np.subtract(pieceArray[1, :], pieceArray[0, :])
-
+        top = np.subtract(pieceArray[1, :], pieceArray[0, :])
+        self.grad = (top, right, bottom, left)
         for i in range(4):
             self.grad[i] = np.reshape(self.grad[i], newshape=(3, pieceLen))
 
 
 class _Edge:
-    def __init__(self, piece0, piece1):
-        self.pieces = []
-        self.piece[0] = piece0
-        self.piece[1] = piece1
+    def __init__(self, piece0, piece1, orient0, orient1):
+        self.pieces = (piece0, piece1)
+        self.orientation = (orient0, orient1)
         # TODO implement cost function here, so that it can determine the orientation
 
-    def __lt__(self, other): #to get heapq to work
+    def __lt__(self, other): #to get heapq to work with this
         pass
     def __eq__(self, other):
         pass
-    
+
+
+def _getAllEdges(piece0, piece1)
+    edges = []
+    for i in range(4):
+        for j in range(4):
+            newEdge = _Edge(piece0, piece1, i, j)
+
 
 class JigsawTree:
     def __init__(self, inFilename, pieceLen):
