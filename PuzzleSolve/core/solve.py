@@ -10,85 +10,104 @@ def _addRandomNoise(array):
     return np.concatenate((array, noisey), 1)
 
 
-#TODO FIx this. currently, it's coded to find the mean of
-#one column (silly goose). It was supposed to do it between 
-#The leftmost and leftmost one next to it
-def _getInverseMeanAndCovariance(gradArray):
-    mean = np.mean(gradArray, 1)
+def _getInverseCovariance(gradArray):
     noiseyGrad = _addRandomNoise(gradArray)
-    covInv = np.linalg.inv(np.cov(noiseyGrad))
-    return (mean, covInv)
+    return np.linalg.inv(np.cov(noiseyGrad))
 
 
 def _compatMeasure(grad, mean, covInv):
     score = float(0)
     P = grad.shape[0]
+    #printe = True
     for p in range(P):
-        deviation = np.transpose(grad[:, p]) - mean
+        #row = np.absolute(grad[p, :])
+        deviation = grad[p, :] - mean
+        #if printe and np.any(np.less([10, 10, 10], row)):
+        #    printe = False
         term = np.matmul(deviation, covInv)
         score += np.matmul(term, deviation)
-    return score
+    #if(printe):
+    #    print(score)
+    return score#, printe
 
-
-def symetricCompatMeasure(leftColumn, rightColumn):
-    l_mean, l_covInv = _getInverseMeanAndCovariance(leftColumn)
-    r_mean, r_covInv = _getInverseMeanAndCovariance(rightColumn)
-
-    grad_lr = np.subtract(rightColumn, leftColumn)
-    grad_rl = np.multiply(grad_lr, -1)
-
-    d_lr = _compatMeasure(grad_lr, l_mean, l_covInv)
-    d_rl = _compatMeasure(grad_rl, r_mean, r_covInv)
-
-    return d_lr + d_rl
-
+#TODO Not working. edge weights must be wrong or something
 
 class _Piece:
     def __init__(self, imgArray, i, j, pieceLen):
+
+
         self.i, self.j = i, j
         x0, y0 = j * pieceLen, i * pieceLen
         x1, y1 = x0 + pieceLen, y0 + pieceLen
-        pieceArray = imgArray[x0:x1, y0:y1]
+        pieceArray = imgArray[y0:y1, x0:x1]
+        left, right = pieceArray[:, 0], pieceArray[:, -1]
+        bottom, top = pieceArray[-1, :], pieceArray[0, :]
+        bottom, left = np.flipud(bottom), np.flipud(left)
+        #print('start')
+        #print(bottom)
         # 0 for top, 1 for right, 2 for bottom, 3 for left
-        #TODO fix this. This should store the absolute edges,
-        #not the gradient along the edges. The thing that should
-        #be stored in that regrad is the mean and the covariance 
-        #matrix of the gradient
-        left = np.subtract(pieceArray[:, 1], pieceArray[:, 0])
-        right = np.subtract(pieceArray[:, pieceLen - 2],
-                            pieceArray[:, pieceLen - 1])
-        bottom = np.subtract(pieceArray[pieceArray - 2, :],
-                             pieceArray[pieceArray - 1, :])
-        top = np.subtract(pieceArray[1, :], pieceArray[0, :])
-        self.grad = (top, right, bottom, left)
-        for i in range(4):
-            self.grad[i] = np.reshape(self.grad[i], newshape=(3, pieceLen))
+
+        self.cols = np.array([top, right, bottom, left])
+
+        #print("break")
+
+        leftInt, rightInt = pieceArray[:, 1], pieceArray[:, -2]
+        bottomInt, topInt = pieceArray[-2, :], pieceArray[1, :]
+        bottomInt, leftInt = np.flipud(bottomInt), np.flipud(leftInt)
+        #print(bottomInt)
+        #print("end")
+
+        interiors = np.array([topInt, rightInt, bottomInt, leftInt])
+
+        means, covInvs = [], []
+        for x in range(4):
+            gradArray = np.transpose(self.cols[x] - interiors[x])
+            #print("x%d" % x)
+            #print(self.cols[x])
+            #print(interiors[x])
+            #print("subtract")
+            #print(self.cols[x] - interiors[x])
+            #print()
+            means.append(np.mean(gradArray, 1))
+            covInvs.append(_getInverseCovariance(gradArray))
+
+        #print("i: %d, j: %d, rgb: %r" % (i, j, self.cols))
+        #print(np.nonzero(pieceArray == [116, 94, 79]))
+
+        self.means = np.array(means)
+        self.covInvs = np.array(covInvs)
+
+    def __getitem__(self, key):
+        return self.cols[key]
 
 
 class _Edge:
     def __init__(self, piece1, piece2, orient1, orient2):
         self.pieces = (piece1, piece2)
-        self.orientation = orient1 * 4 + orient2
-        self.dissim = symetricCompatMeasure(piece1[orient1], piece2[orient2])
+        #self.orientation = orient1 * 4 + orient2
+        self.orientation = (orient1, orient2)
+        self.dissim = _Edge.symetricCompatMeasure(piece1, orient1,
+                                                  piece2, orient2)
 
     def __lt__(self, other):  # to get heapq to work with this
         return self.dissim < other.dissim
 
     def __eq__(self, other):
-        return self.dissim == self.dissim
+        return self.dissim == other.dissim
 
     def sift(self, secondSmallest):
-        self.dissim = self.dissim / secondSmallest
+        self.dissim = self.dissim / secondSmallest.dissim
 
     @staticmethod
     def addEdgesToHeap(heap, piece1, piece2):
         edges = []
-        for i in range(4):
-            for j in range(4):
-                newEdge = _Edge(piece1, piece2, i, j)
+        for r1 in range(4):
+            for r2 in range(4):
+                newEdge = _Edge(piece1, piece2, r1, r2)
+                #print("r1: %d, r2: %d, weight: %r" % (i, j, newEdge.dissim))
                 edges.append(newEdge)
         edges = sorted(edges)
-        min2 = edges[1].dissim
+        min2 = edges[1]
         for edge in edges:
             edge.sift(min2)
             heapq.heappush(heap, edge)
@@ -99,20 +118,53 @@ class _Edge:
         orient2 = orientation % 4
         return (orient1, orient2)
 
+    @staticmethod
+    def symetricCompatMeasure(leftPiece, leftOrient, rightPiece, rightOrient):
+
+        grad_lr = np.flipud(leftPiece[leftOrient]) - rightPiece[rightOrient]
+        grad_rl = np.flipud(rightPiece[rightOrient]) - leftPiece[leftOrient]
+
+        d_lr= _compatMeasure(grad_lr, leftPiece.means[leftOrient],
+                                leftPiece.covInvs[leftOrient])
+        d_rl= _compatMeasure(grad_rl, rightPiece.means[rightOrient],
+                                rightPiece.covInvs[rightOrient])
+        #if a:
+        #    print(grad_lr)
+        #if b:
+        #    print(grad_rl)
+        return d_lr + d_rl
+
 
 class JigsawTree:
     def __init__(self, inFilename, pieceLen):
         imIn = Image.open(inFilename)
-        rows = int(imIn.size[0]/pieceLen)
-        cols = int(imIn.size[1]/pieceLen)
+        rows = int(imIn.size[1]/pieceLen)
+        cols = int(imIn.size[0]/pieceLen)
 
-        imArray = np.asarray(imIn)
+        imIn.show()
 
-        self.edges = [] # TODO doa a priority/heap queue here (heapq)
+        imArray = np.asarray(imIn, dtype=np.int16)
+        #print("rows %s, cols %s" % (rows, cols))
+        #print(imArray.shape)
+
+
+        self.edges = []
         pieces = []
         for i in range(rows):
             for j in range(cols):
                 newPiece = _Piece(imArray, i, j, pieceLen)
-                for piece in self.pieces:
+                for piece in pieces:
+                    #print("i%d, j%d" % (i,j))
                     _Edge.addEdgesToHeap(self.edges, piece, newPiece)
                 pieces.append(newPiece)
+
+
+    def solve(self):
+        while len(self.edges) > 0:
+            edge = heapq.heappop(self.edges)
+            p1, p2 = edge.pieces[0], edge.pieces[1]
+            print("Edge weight: %r, piece1: (%d, %d), piece2: (%d, %d)"
+                 % (edge.dissim, p1.i, p1.j, p2.i, p2.j))
+            print("Rotation: %d, %d" % edge.orientation)
+
+#TODO edges better, but still not matching up quite right seems like
