@@ -122,38 +122,47 @@ class _Cluster:
 
 
     @staticmethod
-    def _prepOneArray(rightArray, leftDestCoord, rightCoord):
-        rows = leftDestCoord[0] + rightArray.shape[0] - rightCoord[0]
-        cols = leftDestCoord[1] + rightArray.shape[1] - rightCoord[1] + 1
+    def _prepOneArray(leftShape, rightArray, leftDestCoord, rightCoord):
+        rowsMaybe = leftDestCoord[0] + rightArray.shape[0] - rightCoord[0]
+        colsMaybe = leftDestCoord[1] + rightArray.shape[1] - rightCoord[1] - 1
+
+        rows = leftShape[0] if leftShape[0] > rowsMaybe else rowsMaybe
+        cols = leftShape[1] if leftShape[1] > colsMaybe else colsMaybe
+
+        #print(leftDestCoord)
 
         #print(leftDestCoord)
         #print(rightCoord)
-
         j_right, j_dest = rightCoord[1], leftDestCoord[1]
-        diff_j = j_dest - j_right + 1
+        diff_j = j_dest - j_right
         
         #print((rightArray.shape[0], diff_j))
         #TODO make sure there diff_j actually > 0
-        empty_left = np.zeros((rightArray.shape[0], diff_j))
+        if diff_j > 0:
+            empty_left = np.zeros((rightArray.shape[0], diff_j))
+            preppedArray = np.concatenate((empty_left, rightArray), axis=1)
+        else:
+            preppedArray = rightArray
 
-        preppedArray = np.concatenate((empty_left, rightArray), axis=1)
-
-        remainingCols = cols - diff_j - rightArray.shape[1]
-        if remainingCols:
+        remainingCols = cols - preppedArray.shape[1]
+        if remainingCols > 0:
             empty_right = np.zeros(shape=(rightArray.shape[0], remainingCols))
             preppedArray = np.concatenate((preppedArray, empty_right), axis=1)
 
         i_right, i_dest = rightCoord[0], leftDestCoord[0]
         diff_i = i_dest - i_right
 
-        #TODO do the same down here as you did up there
-        empty_top = np.zeros(shape=(diff_i, cols))
+        #print(rightArray)
+        #print(leftDestCoord, rightCoord)
 
-        preppedArray = np.concatenate((empty_top, preppedArray), axis=0)
+        if diff_i > 0:
+            empty_top = np.zeros(shape=(diff_i, preppedArray.shape[1]))
+            preppedArray = np.concatenate((empty_top, preppedArray), axis=0)
 
-        remainingRows = rows - diff_i - rightArray.shape[0]
-        if remainingRows:
-            empty_bottom = np.zeros(shape=(rows - diff_i, cols))
+
+        remainingRows = rows - preppedArray.shape[0]
+        if remainingRows > 0:
+            empty_bottom = np.zeros(shape=(remainingRows, preppedArray.shape[1]))
             preppedArray = np.concatenate((preppedArray, empty_bottom), axis=0)
 
         #print(preppedArray)
@@ -162,7 +171,7 @@ class _Cluster:
     @staticmethod
     def _prepArrays(leftArray, rightArray, leftCoord, rightCoord):
         leftDestCoord = (leftCoord[0], leftCoord[1] + 1)
-        newRightArray = _Cluster._prepOneArray(rightArray, leftDestCoord, rightCoord)
+        newRightArray = _Cluster._prepOneArray(leftArray.shape, rightArray, leftDestCoord, rightCoord)
 
         #Now, we flip both arrays and left becomes right and vice versa
         leftArray180 = np.rot90(leftArray, 2)
@@ -171,7 +180,7 @@ class _Cluster:
 
         height_right, width_right = rightArray.shape[0], rightArray.shape[1]
         rightDestCoord180 = (height_right - rightCoord[0] - 1, width_right - rightCoord[1])
-        newLeftArray180 = _Cluster._prepOneArray(leftArray180, rightDestCoord180, leftCoord180)
+        newLeftArray180 = _Cluster._prepOneArray(newRightArray.shape, leftArray180, rightDestCoord180, leftCoord180)
 
         return (np.rot90(newLeftArray180, 2), newRightArray)
 
