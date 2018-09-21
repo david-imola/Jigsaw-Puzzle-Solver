@@ -8,16 +8,16 @@ from PuzzleSolve.core import solve
 import numpy
 import os.path as path
 
-pixels = 1500
+pixels = 500
 inImage = path.join(path.dirname(__file__), "test.jpeg")
 outImage = "/Volumes/Storage/local/puzzle/testpuzz.png"
 
-@nottest
+#@nottest
 def test_puzzle():
     with Puzzle() as puzz:
         puzz.create(inImage, outImage, pixels)
 
-@nottest
+
 def test_solve():
     #inImage = path.join(path.dirname(__file__), "test.jpeg")
     #im = Image.open(inImage)
@@ -26,6 +26,11 @@ def test_solve():
 
     solver = solve.JigsawTree(outImage, pixels)
     solver.solve()
+
+    firstArray = solver.pieces[1].cluster.pieceArray
+    for piece in solver.pieces:
+        if piece is not solver.nullPiece:
+            numpy.testing.assert_array_equal(firstArray, piece.cluster.pieceArray)
 
 #@nottest
 def test_arrayMerge1():
@@ -47,6 +52,8 @@ def test_arrayMerge1():
     numpy.testing.assert_array_equal(result[1], shouldRight)
     numpy.testing.assert_array_equal(result[0], shouldLeft)
 
+    assert not solve.array_conflict(result[0], result[1])
+
 
 def test_arrayMerge2():
     left = numpy.array([[1, 1, 1], [1, 0, 0], [1, 0, 0]])
@@ -64,6 +71,8 @@ def test_arrayMerge2():
     numpy.testing.assert_array_equal(result[1], shouldRight)
     numpy.testing.assert_array_equal(result[0], shouldLeft)
 
+    assert not solve.array_conflict(result[0], result[1])
+
 def test_arrayMerge3():
     left = [
         [1, 0, 0, 1, 0, 1],
@@ -75,7 +84,7 @@ def test_arrayMerge3():
     
     right = [
         [0, 0, 0],
-        [0, 0, 1],
+        [1, 0, 1],
         [1, 1, 1],
         [1, 1, 1]
     ]
@@ -96,7 +105,7 @@ def test_arrayMerge3():
 
     shouldRight = [
         [0, 0, 0, 0, 0, 0, 0],
-        [0, 0, 0, 0, 0, 0, 1],
+        [0, 0, 0, 0, 1, 0, 1],
         [0, 0, 0, 0, 1, 1, 1],
         [0, 0, 0, 0, 1, 1, 1],
         [0, 0, 0, 0, 0, 0, 0],
@@ -106,6 +115,9 @@ def test_arrayMerge3():
 
     numpy.testing.assert_array_equal(result[1], shouldRight)
     numpy.testing.assert_array_equal(result[0] , shouldLeft)
+
+    #there is a conflict in this one
+    assert solve.array_conflict(result[0], result[1])
 
 def test_arrayMerge4():
     leftArray = numpy.array([[1,1,1], [1, 0, 1], [1, 1, 1]])
@@ -122,3 +134,40 @@ def test_arrayMerge4():
 
     numpy.testing.assert_array_equal(result[1], shouldRight)
     numpy.testing.assert_array_equal(result[0] , shouldLeft)
+
+    assert not solve.array_conflict(result[0], result[1])
+
+def test_arrayMerge5():
+    left = [
+        [1, 1, 1],
+        [1, 1, 0]
+    ]
+
+    right = [
+        [1, 1, 1, 1, 1],
+        [0, 0, 0, 1, 1],
+        [0, 0, 1, 1, 1],
+        [0, 0, 1, 0, 1],
+        [0, 0, 1, 1, 1]
+    ]
+
+    leftCoord = (1, 1)
+    rightCoord = (0, 0)
+
+    zeros = [0] * 7
+    shouldLeft = [
+        [1, 1, 1, 0, 0, 0, 0],
+        [1, 1, 0, 0, 0, 0, 0],
+        zeros,
+        zeros,
+        zeros,
+        zeros
+    ]
+
+    leftArray = numpy.array(left)
+    rightArray = numpy.array(right)
+
+    result = solve._Cluster._prepArrays(leftArray, rightArray, leftCoord, rightCoord)
+    numpy.testing.assert_array_equal(result[0], numpy.array(shouldLeft))
+
+    assert not solve.array_conflict(result[0], result[1])

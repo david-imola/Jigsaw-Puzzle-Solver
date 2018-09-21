@@ -4,11 +4,6 @@ from enum import Enum
 import heapq
 
 
-def _rotateArray(array, numRots):
-    if numRots == 0:
-        return array
-    elif numRots == 1:
-        pass
 
 def _addRandomNoise(array):
     np.random.seed(0)  # We actually want consistent noise
@@ -31,9 +26,46 @@ def _compatMeasure(grad, mean, covInv):
     return score
 
 
+def coord_rotateCCW(coord, arrayShape):
+    i_new = arrayShape[1] - coord[1] - 1
+    j_new = coord[0]
+    return (i_new, j_new)
+
+
+def coord_rotateCW(coord, arrayShape):
+    i_new = coord[1]
+    j_new = arrayShape[0] - coord[0] - 1
+    return (i_new, j_new)
+
+
+def coord_flip180(coord, arrayShape):
+    i_new = arrayShape[0] - coord[0] - 1
+    j_new = arrayShape[1] - coord[1] - 1
+    return (i_new, j_new)
+
+
+def coord_rotate(coord, rotations, arrayShape):
+    if rotations == 0:
+        return coord
+    elif rotations == 1:
+        return coord_rotateCCW(coord, arrayShape)
+    elif rotations == 2:
+        return coord_flip180(coord, arrayShape)
+    elif rotations == 3:
+        return coord_rotateCW(coord, arrayShape)
+    else:
+        return False
+
+def array_conflict(array1, array2):
+    return np.any(np.logical_and(array1, array2))
+
+
 class _Piece:
-    def __init__(self, imgArray, index, i, j, pieceLen):
+    def __init__(self, imgArray, index, i, j, pieceLen, clusterCoord=(0, 0), orientation=0):
         self.index = index
+        self.coord = (i, j)
+        self.clusterCoord = clusterCoord
+        self.orientation = orientation
         x0, y0 = j * pieceLen, i * pieceLen
         x1, y1 = x0 + pieceLen, y0 + pieceLen
         pieceArray = imgArray[y0:y1, x0:x1]
@@ -63,6 +95,7 @@ class _Piece:
     def __getitem__(self, key):
         return self.cols[key]
 
+
 class _Edge:
     def __init__(self, piece1, piece2, orient1, orient2):
         self.pieces = (piece1, piece2)
@@ -90,6 +123,8 @@ class _Edge:
                 edges.append(newEdge)
         edges = sorted(edges)
         min2 = edges[1]
+        #TODO ^ for efficienty's sake, make this an algorithm that only finds
+        #The second minimum instead of sorting everything just for it.
         for edge in edges:
             edge.sift(min2)
             heapq.heappush(heap, edge)
@@ -101,7 +136,7 @@ class _Edge:
     def getOrientations(orientation):
         orient1 = orientation / 4
         orient2 = orientation % 4
-        return (orient1, orient2)
+        return (int(orient1), int(orient2))
 
     @staticmethod
     def symetricCompatMeasure(leftPiece, leftOrient, rightPiece, rightOrient):
@@ -115,11 +150,24 @@ class _Edge:
                               rightPiece.covInvs[rightOrient])
         return d_lr + d_rl
 
+
 class _Cluster:
-    def __init__(self, initPiece, pieceIndex):
-        self.pieces = np.array([pieceIndex, 0], ndmin=3)
+    def __init__(self, initPiece, pieceRotateCallback, pieceUpdateCallback):
+        self.pieceArray = np.array([initPiece.index], ndmin=2)
         initPiece.cluster = self
 
+        self.pieceRotateClbk = pieceRotateCallback
+        self.pieceUpdateClbk = pieceUpdateCallback
+
+    def _rotatePieces(self, rotations):
+        for _, index in np.ndenumerate(self.pieceArray):
+            if index != 0:
+                self.pieceRotateClbk(int(index), rotations)
+
+    def _updatePieces(self):
+        for coord, index in np.ndenumerate(self.pieceArray):
+            if index != 0:
+                self.pieceUpdateClbk(self, int(index), coord)
 
     @staticmethod
     def _prepOneArray(leftShape, rightArray, leftDestCoord, rightCoord):
@@ -129,15 +177,9 @@ class _Cluster:
         rows = leftShape[0] if leftShape[0] > rowsMaybe else rowsMaybe
         cols = leftShape[1] if leftShape[1] > colsMaybe else colsMaybe
 
-        #print(leftDestCoord)
-
-        #print(leftDestCoord)
-        #print(rightCoord)
         j_right, j_dest = rightCoord[1], leftDestCoord[1]
         diff_j = j_dest - j_right
         
-        #print((rightArray.shape[0], diff_j))
-        #TODO make sure there diff_j actually > 0
         if diff_j > 0:
             empty_left = np.zeros((rightArray.shape[0], diff_j))
             preppedArray = np.concatenate((empty_left, rightArray), axis=1)
@@ -146,54 +188,128 @@ class _Cluster:
 
         remainingCols = cols - preppedArray.shape[1]
         if remainingCols > 0:
-            empty_right = np.zeros(shape=(rightArray.shape[0], remainingCols))
+            empty_right = np.zeros((rightArray.shape[0], remainingCols))
             preppedArray = np.concatenate((preppedArray, empty_right), axis=1)
 
         i_right, i_dest = rightCoord[0], leftDestCoord[0]
         diff_i = i_dest - i_right
 
-        #print(rightArray)
-        #print(leftDestCoord, rightCoord)
-
         if diff_i > 0:
-            empty_top = np.zeros(shape=(diff_i, preppedArray.shape[1]))
+            empty_top = np.zeros((diff_i, preppedArray.shape[1]))
             preppedArray = np.concatenate((empty_top, preppedArray), axis=0)
-
 
         remainingRows = rows - preppedArray.shape[0]
         if remainingRows > 0:
-            empty_bottom = np.zeros(shape=(remainingRows, preppedArray.shape[1]))
+            empty_bottom = np.zeros((remainingRows, preppedArray.shape[1]))
             preppedArray = np.concatenate((preppedArray, empty_bottom), axis=0)
 
-        #print(preppedArray)
         return preppedArray
 
     @staticmethod
     def _prepArrays(leftArray, rightArray, leftCoord, rightCoord):
         leftDestCoord = (leftCoord[0], leftCoord[1] + 1)
-        newRightArray = _Cluster._prepOneArray(leftArray.shape, rightArray, leftDestCoord, rightCoord)
+        newRightArray = _Cluster._prepOneArray(leftArray.shape, rightArray,
+                                            leftDestCoord, rightCoord)
 
         #Now, we flip both arrays and left becomes right and vice versa
         leftArray180 = np.rot90(leftArray, 2)
-        height_left, width_left = leftArray.shape[0], leftArray.shape[1]
-        leftCoord180 = (height_left - leftCoord[0] -1, width_left - leftCoord[1] -1)
+        leftCoord180 = coord_flip180(leftCoord, leftArray.shape)
 
-        height_right, width_right = rightArray.shape[0], rightArray.shape[1]
-        rightDestCoord180 = (height_right - rightCoord[0] - 1, width_right - rightCoord[1])
-        newLeftArray180 = _Cluster._prepOneArray(newRightArray.shape, leftArray180, rightDestCoord180, leftCoord180)
-
+        rightCoord180 = coord_flip180(rightCoord, rightArray.shape)
+        rightDestCoord180 = (rightCoord180[0], rightCoord180[1] + 1)
+        newLeftArray180 = _Cluster._prepOneArray(newRightArray.shape,
+                                                 leftArray180,
+                                                 rightDestCoord180,
+                                                 leftCoord180)
         return (np.rot90(newLeftArray180, 2), newRightArray)
-
 
     @staticmethod
     def potentiallyMerge(edge):
         if edge.pieces[0].cluster is edge.pieces[1].cluster:
-            return False #That edge can be disregarded
-        #Returns true if a merge occured, false otherwise
-        rot1, rot2 = edge.getOrientation()
-        rots = (6 + rot1 - rot2) % 4
-        #pieceRot = pieceRot + rot % 4 
-        # TODO finish piece/cluster rotation
+            return False  # That edge can be disregarded
+
+        #print(edge.pieces[0].coord, edge.pieces[1].coord)
+
+        #first check for merge conflict
+        #if merge conflict, return false
+        #otherwise, merge the arrays and update the rotationos and coords of the pieces
+
+        leftCluster = edge.pieces[0].cluster
+        rightCluster = edge.pieces[1].cluster
+
+        orientLeft, orientRight = edge.getOrientation()
+
+        #left_subtrahend = edge.pieces[0].orientation if hasattr(edge.pieces[0], "orientation") else orientLeft
+        #right_subtrahend = edge.pieces[1].orientation if hasattr(edge.pieces[1], "orientation") else orientRight
+
+        rotsLeft = (7 - edge.pieces[0].orientation - orientLeft) % 4
+        rotsRight = (9 - edge.pieces[1].orientation - orientRight) % 4
+
+        #print("rotsLeft, rotsRight (%d, %d)" % (rotsLeft, rotsRight))
+
+        #print("edgeOrientLeft: %d, edgeOrientRight: %d" % (orientLeft, orientRight))
+
+        #print("orieLeftPiece (%d)" % edge.pieces[0].orientation)
+        #print("orieRightPiece (%d)" % edge.pieces[1].orientation)
+
+        leftCoord_oriented = coord_rotate(edge.pieces[0].clusterCoord,
+                                          rotsLeft, leftCluster.pieceArray.shape)
+        rightCoord_oriented = coord_rotate(edge.pieces[1].clusterCoord,
+                                           rotsRight, rightCluster.pieceArray.shape)
+        
+        leftArray_oriented = np.rot90(leftCluster.pieceArray, rotsLeft)
+        rightArray_oriented = np.rot90(rightCluster.pieceArray, rotsRight)
+
+        leftArray_filled, rightArray_filled =\
+            _Cluster._prepArrays(leftArray=leftArray_oriented,
+                                            rightArray=rightArray_oriented,
+                                            leftCoord=leftCoord_oriented,
+                                            rightCoord=rightCoord_oriented)
+
+        #print("left_filled:\n",leftArray_filled)
+        #print("right_filled\n", rightArray_filled)
+
+        # Check for merge conflict
+        if array_conflict(leftArray_filled, rightArray_filled):
+            return False
+
+
+        # if either of the pieces doesn't have an orientation already,
+        # initialize it to the edge's orientation for that piece
+        #if not hasattr(edge.pieces[0], "orientation"):
+        #    edge.pieces[0].orientation = 0
+        #if not hasattr(edge.pieces[1], "orientation"):
+        #    edge.pieces[1].orientation = 0
+
+        #Rotate the arrays' pieces
+        leftCluster._rotatePieces(rotsLeft)
+        rightCluster._rotatePieces(rotsRight)
+
+        # if no conflict, we can go ahead and merge the arrays
+        merged = np.where(leftArray_filled == 0,
+                          rightArray_filled, leftArray_filled)
+
+        # Delete the right piece's cluster: no longer neccessary as it will be merged
+        del rightCluster
+
+        #Assign the new merged array as left's cluster
+        leftCluster.pieceArray = merged
+
+        #print("merged\n", merged)
+        
+        #Make the newly merged cluster's pieces realise their correct indeces
+        leftCluster._updatePieces()
+
+        #edge.pieces[1].cluster = leftCluster
+
+        #print(edge.pieces[1].cluster.pieceArray)
+        
+        #print("orieLeftPiece (%d)" % edge.pieces[0].orientation)
+        #print("orieRightPiece (%d)" % edge.pieces[1].orientation)
+
+        #print()
+
+        return True
 
 
 class JigsawTree:
@@ -205,26 +321,37 @@ class JigsawTree:
         imArray = np.asarray(imIn, dtype=np.int16)
 
         self.edges = []
-        self.pieces = []
+
+        self.nullPiece = None
+        self.pieces = [self.nullPiece]
         for i in range(rows):
             for j in range(cols):
                 newPiece = _Piece(imArray, len(self.pieces), i, j, pieceLen)
                 for piece in self.pieces:
-                    _Edge.addEdgesToHeap(self.edges, piece, newPiece)
+                    if piece is not self.nullPiece:
+                        _Edge.addEdgesToHeap(self.edges, piece, newPiece)
                 self.pieces.append(newPiece)
-        self.pieceCount = len(self.pieces)
-        for x in range(self.pieceCount):
-            _Cluster(self.pieces[x], x)
+        self.pieceCount = len(self.pieces) - 1  # exclude tne nullPiece
+        for x in range(1, self.pieceCount + 1):
+            _Cluster(self.pieces[x], self.rotatePiece, self.updatePiece)
 
     def solve(self):
-        treeCount = self.pieceCount
-        c = 0
-        while c < 7:
+        clusterCount = self.pieceCount
+        while clusterCount > 1:
             edge = heapq.heappop(self.edges)
             if _Cluster.potentiallyMerge(edge):
-                treeCount -= 1
-            p1, p2 = edge.pieces[0], edge.pieces[1]
-            print("Edge weight: %r, piece1: (%d), piece2: (%d)"
-                 % (edge.dissim, p1.index, p2.index))
-            print("Rotation: %d, %d" % edge.getOrientation())
-            c += 1
+                clusterCount -= 1
+
+        #for piece in self.pieces:
+        #    if piece is not self.nullPiece:
+        #        print(piece.index)
+        #        print(piece.cluster.pieceArray)
+
+
+    def rotatePiece(self, index, rotation):
+        newOrient = (self.pieces[index].orientation + rotation) % 4
+        self.pieces[index].orientation = newOrient
+
+    def updatePiece(self, cluster, index, coord):
+        self.pieces[index].cluster = cluster
+        self.pieces[index].clusterCoord = coord
