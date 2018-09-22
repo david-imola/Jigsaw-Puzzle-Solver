@@ -76,4 +76,4 @@ def CreatePuzzle(inFilename, outFilename, pieceLen):
                 activeRowCnt -= 1  # Decrement the # of active rows
             outI = _GetRandomIndex(rowLens, activeRowCnt)
             
-    imOut.save(outFilename, "PNG") #Must be png for losless compression (or else the pieces bleed into each other)
+    imOut.save(outFilename, "PNG")  # Must be png for losless compression (or else the pieces bleed into each other)

@@ -4,11 +4,10 @@ from PIL import Image
 
 from PuzzleSolve.core import solve
 
-
 import numpy
 import os.path as path
 
-pixels = 500
+pixels = 250
 inImage = path.join(path.dirname(__file__), "test.jpeg")
 outImage = "/Volumes/Storage/local/puzzle/testpuzz.png"
 
@@ -17,7 +16,7 @@ def test_puzzle():
     with Puzzle() as puzz:
         puzz.create(inImage, outImage, pixels)
 
-
+#@nottest
 def test_solve():
     #inImage = path.join(path.dirname(__file__), "test.jpeg")
     #im = Image.open(inImage)
@@ -27,10 +26,17 @@ def test_solve():
     solver = solve.JigsawTree(outImage, pixels)
     solver.solve()
 
-    firstArray = solver.pieces[1].cluster.pieceArray
+    firstCluster = solver.pieces[1].cluster
     for piece in solver.pieces:
         if piece is not solver.nullPiece:
-            numpy.testing.assert_array_equal(firstArray, piece.cluster.pieceArray)
+            assert piece.cluster is firstCluster
+
+    solver.showPuzzle()
+
+@nottest
+def test_displayEdges():
+    solver = solve.JigsawTree(outImage, pixels)
+    solver.showEdges()
 
 #@nottest
 def test_arrayMerge1():

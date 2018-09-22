@@ -2,7 +2,7 @@ from PIL import Image
 import numpy as np
 from enum import Enum
 import heapq
-
+import copy
 
 
 def _addRandomNoise(array):
@@ -56,6 +56,14 @@ def coord_rotate(coord, rotations, arrayShape):
     else:
         return False
 
+def translate_CCW_CW(rotations):
+    if rotations == 2 or rotations == 0:
+        return rotations
+    elif rotations == 1:
+        return 3
+    elif rotations == 3:
+        return 1
+
 def array_conflict(array1, array2):
     return np.any(np.logical_and(array1, array2))
 
@@ -66,6 +74,7 @@ class _Piece:
         self.coord = (i, j)
         self.clusterCoord = clusterCoord
         self.orientation = orientation
+        self.edges = [[], [], [], []] # top, left, bottom, righty
         x0, y0 = j * pieceLen, i * pieceLen
         x1, y1 = x0 + pieceLen, y0 + pieceLen
         pieceArray = imgArray[y0:y1, x0:x1]
@@ -97,12 +106,20 @@ class _Piece:
 
 
 class _Edge:
-    def __init__(self, piece1, piece2, orient1, orient2):
+    def __init__(self, piece1, piece2, orient1, orient2=None, dissim=None):
         self.pieces = (piece1, piece2)
-        self.orientation = orient1 * 4 + orient2
+        if orient2 is None:
+            self.orientation = orient1
+        else:
+            self.orientation = orient1 * 4 + orient2
         #self.orientation = (orient1, orient2)
-        self.dissim = _Edge.symetricCompatMeasure(piece1, orient1,
-                                                  piece2, orient2)
+        if dissim is None:
+            self.dissim = _Edge.symetricCompatMeasure(piece1, orient1,
+                                                      piece2, orient2)
+        else:
+            self.dissim = dissim
+
+        
 
     def __lt__(self, other):  # to get heapq to work with this
         return self.dissim < other.dissim
@@ -113,21 +130,35 @@ class _Edge:
     def sift(self, secondSmallest):
         self.dissim = self.dissim / secondSmallest.dissim
 
+    @classmethod
+    def copy(cls, instance):
+        pieces = copy.copy(instance.pieces)
+        orientation = copy.deepcopy(instance.orientation)
+        dissim = copy.deepcopy(instance.dissim)
+
+        return cls(pieces[0], pieces[1], orientation, None, dissim)
+
     @staticmethod
-    def addEdgesToHeap(heap, piece1, piece2):
-        edges = []
+    def addToPieceEdges(leftPiece, rightPiece):
+        #edges = [[], [], [], []]
         for r1 in range(4):
             for r2 in range(4):
-                newEdge = _Edge(piece1, piece2, r1, r2)
                 #print("r1: %d, r2: %d, weight: %r" % (i, j, newEdge.dissim))
-                edges.append(newEdge)
-        edges = sorted(edges)
-        min2 = edges[1]
+                newEdgeLeft = _Edge(leftPiece, rightPiece, r1, r2)
+                leftPiece.edges[r1].append(newEdgeLeft)
+                newEdgeRight = _Edge.copy(newEdgeLeft)
+                rightPiece.edges[r2].append(newEdgeRight)
+        #edges = sorted(edges)
+        #min2 = edges[1]
         #TODO ^ for efficienty's sake, make this an algorithm that only finds
         #The second minimum instead of sorting everything just for it.
-        for edge in edges:
-            edge.sift(min2)
-            heapq.heappush(heap, edge)
+        #for edge in edges:
+        #    if (piece1.index == 9 and piece2.index == 5) or (piece1.index == 5 and piece2.index == 9):
+        #        print(edge.dissim)
+        #    edge.sift(min2)
+        #    heapq.heappush(heap, edge)
+
+        #print()
 
     def getOrientation(self):
         return _Edge.getOrientations(self.orientation)
@@ -289,8 +320,19 @@ class _Cluster:
         merged = np.where(leftArray_filled == 0,
                           rightArray_filled, leftArray_filled)
 
+        #print(edge.pieces[0].index)
+        #print(leftCluster.pieceArray)
+
+        #print(edge.dissim)
+
+        #print(edge.pieces[1].index)
+        #print(rightCluster.pieceArray)
+
+        #print(merged)
+        #print()
+        #print()
         # Delete the right piece's cluster: no longer neccessary as it will be merged
-        del rightCluster
+        #del rightCluster
 
         #Assign the new merged array as left's cluster
         leftCluster.pieceArray = merged
@@ -314,28 +356,58 @@ class _Cluster:
 
 class JigsawTree:
     def __init__(self, inFilename, pieceLen):
-        imIn = Image.open(inFilename)
-        rows = int(imIn.size[1]/pieceLen)
-        cols = int(imIn.size[0]/pieceLen)
+        self.imIn = Image.open(inFilename)
+        self.rows = int(self.imIn.size[1]/pieceLen)
+        self.cols = int(self.imIn.size[0]/pieceLen)
 
-        imArray = np.asarray(imIn, dtype=np.int16)
+        imArray = np.asarray(self.imIn, dtype=np.int16)
 
-        self.edges = []
+        self.pieceLen = pieceLen
 
+        
         self.nullPiece = None
         self.pieces = [self.nullPiece]
-        for i in range(rows):
-            for j in range(cols):
+        for i in range(self.rows):
+            for j in range(self.cols):
                 newPiece = _Piece(imArray, len(self.pieces), i, j, pieceLen)
                 for piece in self.pieces:
                     if piece is not self.nullPiece:
-                        _Edge.addEdgesToHeap(self.edges, piece, newPiece)
+                        _Edge.addToPieceEdges(piece, newPiece)
                 self.pieces.append(newPiece)
+
+        self.edges = []
+
+        for piece in self.pieces:
+            if piece is not self.nullPiece:
+                for allEdges in piece.edges:
+                    allEdges = sorted(allEdges)
+                    min2 = allEdges[1]
+                    #TODO ^ for efficienty's sake, make this an algorithm that only finds
+                    #The second minimum instead of sorting everything just for it.
+                    for edge in allEdges:
+                        edge.sift(min2)
+                        heapq.heappush(self.edges, edge)
+
+
+
+
         self.pieceCount = len(self.pieces) - 1  # exclude tne nullPiece
         for x in range(1, self.pieceCount + 1):
             _Cluster(self.pieces[x], self.rotatePiece, self.updatePiece)
 
+        
+
+    def showEdges(self):
+        while len(self.edges) > 1000:
+            edge = heapq.heappop(self.edges)
+            p1, p2 = edge.pieces[0], edge.pieces[1]
+            print("Edge weight: %r, piece1: (%d, %d), piece2: (%d, %d)"
+                  % (edge.dissim, p1.coord[0], p1.coord[1], p2.coord[0], p2.coord[1]))
+            print("Rotation: %d, %d" % edge.getOrientation())
+        #TODO finsih up here
+
     def solve(self):
+        #Will be 8*n*(n-1) edges produced
         clusterCount = self.pieceCount
         while clusterCount > 1:
             edge = heapq.heappop(self.edges)
@@ -346,6 +418,31 @@ class JigsawTree:
         #    if piece is not self.nullPiece:
         #        print(piece.index)
         #        print(piece.cluster.pieceArray)
+
+    def showPuzzle(self):
+        pieceArray = self.pieces[1].cluster.pieceArray
+        shape = pieceArray.shape
+        size = (shape[1] * self.pieceLen, shape[0] * self.pieceLen)
+        solvedIm = Image.new("RGB", size)
+
+        for (i,j), index in np.ndenumerate(pieceArray):
+            if int(index) == 0:
+                continue
+            inX, inY = int((index - 1) % self.cols) * self.pieceLen, int((index - 1) / self.cols) * self.pieceLen
+            data = (inX, inY, inX + self.pieceLen, inY + self.pieceLen)
+            imPiece = self.imIn.transform((self.pieceLen, self.pieceLen), Image.EXTENT, data)
+            numRots = self.pieces[int(index)].orientation
+            #print(numRots)
+            #print(translate_CCW_CW(numRots))
+            #print()
+            if numRots:
+                imPiece = imPiece.rotate(90  * numRots)
+            solvedCoord = (j * self.pieceLen, i * self.pieceLen)
+            solvedIm.paste(imPiece, solvedCoord)
+
+        #print(pieceArray)
+        solvedIm.show("Solved Puzzle")
+
 
 
     def rotatePiece(self, index, rotation):
