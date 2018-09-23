@@ -56,43 +56,45 @@ def coord_rotate(coord, rotations, arrayShape):
     else:
         return False
 
-def translate_CCW_CW(rotations):
-    if rotations == 2 or rotations == 0:
-        return rotations
-    elif rotations == 1:
-        return 3
-    elif rotations == 3:
-        return 1
 
 def array_conflict(array1, array2):
     return np.any(np.logical_and(array1, array2))
 
 
 class _Piece:
-    def __init__(self, imgArray, index, i, j, pieceLen, clusterCoord=(0, 0), orientation=0):
-        self.index = index
-        self.coord = (i, j)
-        self.clusterCoord = clusterCoord
+    def __init__(self, imgArray, index, i, j, pieceLen,
+                 clusterCoord=(0, 0), orientation=0):
+        self.index = index  # Index in our piece array
+        self.clusterCoord = clusterCoord  # Coordinate in the piece's cluster
         self.orientation = orientation
-        self.edges = [[], [], [], []] # top, left, bottom, righty
+        # ^ How many times this piece is rotated counter-cw within its cluster
+
+        # "Edges" here refer to edges in a graph.
+        # Each subarray here refers to the edges of this piece's
+        # top, left, bottom and right sides respectively
+        self.edges = [[], [], [], []]
+
+        # Select the individual pieceArray from the whole image array
         x0, y0 = j * pieceLen, i * pieceLen
         x1, y1 = x0 + pieceLen, y0 + pieceLen
         pieceArray = imgArray[y0:y1, x0:x1]
+
+        # Save the outermost rows/columns of the image to compute edges
+        # 0 for top, 1 for left, 2 for bottom, 3 for right
         left, right = pieceArray[:, 0], pieceArray[:, -1]
         bottom, top = pieceArray[-1, :], pieceArray[0, :]
-
+        # When the bottom and left sides are rotated into being the right side,
+        # they get flipped upside-down. Hence we need to do flip them here.
         bottom, left = np.flipud(bottom), np.flipud(left)
-        # 0 for top, 1 for left, 2 for bottom, 3 for bottom
-        #(Counter-clockwise)
         self.cols = np.array([top, left, bottom, right])
 
+        # Find the interior rows/columns to compute the gradient
         leftInt, rightInt = pieceArray[:, 1], pieceArray[:, -2]
         bottomInt, topInt = pieceArray[-2, :], pieceArray[1, :]
         bottomInt, leftInt = np.flipud(bottomInt), np.flipud(leftInt)
-
         interiors = np.array([topInt, leftInt, bottomInt, rightInt])
 
-        means, covInvs = [], []
+        means, covInvs = [], []  # The mean and inverse covariance of each side
         for x in range(4):
             gradArray = np.transpose(self.cols[x] - interiors[x])
             means.append(np.mean(gradArray, 1))
@@ -111,17 +113,15 @@ class _Edge:
         if orient2 is None:
             self.orientation = orient1
         else:
+            # To save a little memory, store the orientations in one base-4 int
             self.orientation = orient1 * 4 + orient2
-        #self.orientation = (orient1, orient2)
         if dissim is None:
             self.dissim = _Edge.symetricCompatMeasure(piece1, orient1,
                                                       piece2, orient2)
         else:
             self.dissim = dissim
 
-        
-
-    def __lt__(self, other):  # to get heapq to work with this
+    def __lt__(self, other):
         return self.dissim < other.dissim
 
     def __eq__(self, other):
@@ -130,8 +130,27 @@ class _Edge:
     def sift(self, secondSmallest):
         self.dissim = self.dissim / secondSmallest.dissim
 
+    def getOrientation(self):
+        '''
+        Returns a tuple of the orientation for the left and right pieces.
+        0 for top, 1 for left, 2 for  bottom, 3 for right.
+        So if this returned the tuple (2, 3), then this edge's left piece's
+        bottom side is being considered against the right piece's right side.
+        '''
+        # Convert our single 2-digit base-4 back into two distinct numbers
+        orient1 = self.orientation / 4
+        orient2 = self.orientation % 4
+        return (int(orient1), int(orient2))
+
     @classmethod
     def copy(cls, instance):
+        """
+        Creates a copy of an edge. Keeps the references to the pieces the same, but
+        creates a unique copy of the orientations and weight (dissimulatiry measure).
+        Use to save time when you don't need to recalculate an edge weight, but want to
+        have two copies of the edge, one for each piece. This way, when you sift, you don't
+        end up altering the same edge twice (one time for each piece).
+        """
         pieces = copy.copy(instance.pieces)
         orientation = copy.deepcopy(instance.orientation)
         dissim = copy.deepcopy(instance.dissim)
@@ -140,34 +159,20 @@ class _Edge:
 
     @staticmethod
     def addToPieceEdges(leftPiece, rightPiece):
-        #edges = [[], [], [], []]
+        """
+        Builds edges from all combinations of the two pieces,
+        then stores the edges in the two pieces
+        """
         for r1 in range(4):
             for r2 in range(4):
-                #print("r1: %d, r2: %d, weight: %r" % (i, j, newEdge.dissim))
                 newEdgeLeft = _Edge(leftPiece, rightPiece, r1, r2)
                 leftPiece.edges[r1].append(newEdgeLeft)
+
+                # Here we copy, instead of initializing again a la above,
+                # So we don't have to compute the wieght again.
                 newEdgeRight = _Edge.copy(newEdgeLeft)
                 rightPiece.edges[r2].append(newEdgeRight)
-        #edges = sorted(edges)
-        #min2 = edges[1]
-        #TODO ^ for efficienty's sake, make this an algorithm that only finds
-        #The second minimum instead of sorting everything just for it.
-        #for edge in edges:
-        #    if (piece1.index == 9 and piece2.index == 5) or (piece1.index == 5 and piece2.index == 9):
-        #        print(edge.dissim)
-        #    edge.sift(min2)
-        #    heapq.heappush(heap, edge)
 
-        #print()
-
-    def getOrientation(self):
-        return _Edge.getOrientations(self.orientation)
-
-    @staticmethod
-    def getOrientations(orientation):
-        orient1 = orientation / 4
-        orient2 = orientation % 4
-        return (int(orient1), int(orient2))
 
     @staticmethod
     def symetricCompatMeasure(leftPiece, leftOrient, rightPiece, rightOrient):
@@ -201,34 +206,40 @@ class _Cluster:
                 self.pieceUpdateClbk(self, int(index), coord)
 
     @staticmethod
-    def _prepOneArray(leftShape, rightArray, leftDestCoord, rightCoord):
-        rowsMaybe = leftDestCoord[0] + rightArray.shape[0] - rightCoord[0]
-        colsMaybe = leftDestCoord[1] + rightArray.shape[1] - rightCoord[1] - 1
-
+    def _prepOneArray(leftShape, rightArray, leftCoord, rightCoord):
+        # i_0 + height_0 - i_1
+        # If the left array only had the column of the left piece,
+        # this would be how many total rows would be required
+        rowsMaybe = leftCoord[0] + rightArray.shape[0] - rightCoord[0]
+        # ...But because there's more than one column in the left array
+        # One of those columns might make the array taller
         rows = leftShape[0] if leftShape[0] > rowsMaybe else rowsMaybe
+
+        colsMaybe = leftCoord[1] + rightArray.shape[1] - rightCoord[1] + 1
         cols = leftShape[1] if leftShape[1] > colsMaybe else colsMaybe
 
-        j_right, j_dest = rightCoord[1], leftDestCoord[1]
-        diff_j = j_dest - j_right
-        
+        # How many zero columns to the left of the mass
+        # Add the one here because its being placed in the next column over
+        diff_j = leftCoord[1] - rightCoord[1] + 1
         if diff_j > 0:
             empty_left = np.zeros((rightArray.shape[0], diff_j))
             preppedArray = np.concatenate((empty_left, rightArray), axis=1)
-        else:
+        else: # this could happen when width_left < width_right
             preppedArray = rightArray
 
+        # How many columns of zero to the right the mass
         remainingCols = cols - preppedArray.shape[1]
         if remainingCols > 0:
             empty_right = np.zeros((rightArray.shape[0], remainingCols))
             preppedArray = np.concatenate((preppedArray, empty_right), axis=1)
 
-        i_right, i_dest = rightCoord[0], leftDestCoord[0]
-        diff_i = i_dest - i_right
-
-        if diff_i > 0:
+        # How many rows of zero above the mass
+        diff_i = leftCoord[0] - rightCoord[0]
+        if diff_i > 0:  # this would be false if height_left < height_right
             empty_top = np.zeros((diff_i, preppedArray.shape[1]))
             preppedArray = np.concatenate((empty_top, preppedArray), axis=0)
 
+        # How many rows of zero below the mass
         remainingRows = rows - preppedArray.shape[0]
         if remainingRows > 0:
             empty_bottom = np.zeros((remainingRows, preppedArray.shape[1]))
@@ -238,81 +249,76 @@ class _Cluster:
 
     @staticmethod
     def _prepArrays(leftArray, rightArray, leftCoord, rightCoord):
-        leftDestCoord = (leftCoord[0], leftCoord[1] + 1)
         newRightArray = _Cluster._prepOneArray(leftArray.shape, rightArray,
-                                            leftDestCoord, rightCoord)
+                                               leftCoord, rightCoord)
 
-        #Now, we flip both arrays and left becomes right and vice versa
+        # Now, we flip both arrays and left becomes right and vice versa
         leftArray180 = np.rot90(leftArray, 2)
         leftCoord180 = coord_flip180(leftCoord, leftArray.shape)
 
         rightCoord180 = coord_flip180(rightCoord, rightArray.shape)
-        rightDestCoord180 = (rightCoord180[0], rightCoord180[1] + 1)
         newLeftArray180 = _Cluster._prepOneArray(newRightArray.shape,
                                                  leftArray180,
-                                                 rightDestCoord180,
+                                                 rightCoord180,
                                                  leftCoord180)
         return (np.rot90(newLeftArray180, 2), newRightArray)
 
     @staticmethod
     def potentiallyMerge(edge):
         if edge.pieces[0].cluster is edge.pieces[1].cluster:
-            return False  # That edge can be disregarded
-
-        #print(edge.pieces[0].coord, edge.pieces[1].coord)
-
-        #first check for merge conflict
-        #if merge conflict, return false
-        #otherwise, merge the arrays and update the rotationos and coords of the pieces
+            # This edge to be disregarded if already in the same cluster
+            return False
 
         leftCluster = edge.pieces[0].cluster
         rightCluster = edge.pieces[1].cluster
 
         orientLeft, orientRight = edge.getOrientation()
 
-        #left_subtrahend = edge.pieces[0].orientation if hasattr(edge.pieces[0], "orientation") else orientLeft
-        #right_subtrahend = edge.pieces[1].orientation if hasattr(edge.pieces[1], "orientation") else orientRight
-
+        # How many rotations are required to flip this edge's
+        # left piece's side into being the right side of that piece
         rotsLeft = (7 - edge.pieces[0].orientation - orientLeft) % 4
+
+        # How many rotations required to rotate the right piece's side
+        # in question into being its left side (counter-clockwise)
         rotsRight = (9 - edge.pieces[1].orientation - orientRight) % 4
 
-        #print("rotsLeft, rotsRight (%d, %d)" % (rotsLeft, rotsRight))
-
-        #print("edgeOrientLeft: %d, edgeOrientRight: %d" % (orientLeft, orientRight))
-
-        #print("orieLeftPiece (%d)" % edge.pieces[0].orientation)
-        #print("orieRightPiece (%d)" % edge.pieces[1].orientation)
-
+        # The cluster coordinate of the left piece in question
+        # after being rotated
         leftCoord_oriented = coord_rotate(edge.pieces[0].clusterCoord,
-                                          rotsLeft, leftCluster.pieceArray.shape)
+                                          rotsLeft,
+                                          leftCluster.pieceArray.shape)
+        # The coord of the right piece after being rotated to its left side
+        # within it's cluster, in terms of (row, column).
         rightCoord_oriented = coord_rotate(edge.pieces[1].clusterCoord,
-                                           rotsRight, rightCluster.pieceArray.shape)
-        
+                                           rotsRight,
+                                           rightCluster.pieceArray.shape)
+
+        # The left and right cluster arrays after being rotated
+        # so that the left cluster's piece's right side matches up with
+        # the right cluster's piece's left side
         leftArray_oriented = np.rot90(leftCluster.pieceArray, rotsLeft)
         rightArray_oriented = np.rot90(rightCluster.pieceArray, rotsRight)
 
+        # The arrays, padded with zeros, so that they're both the same size
+        # And they lie within the same coordinate plane based on which pieces are to be matched.
+        # Example: Given the arrays...
+        # [[1, 2]   and   [[6, 7]
+        #  [3, 4]]         [0, 9]]
+        # If we were to match piece 4 with piece 6, the filled arrays would become...
+        # [[1, 2, 0 ,0]   and  [[0, 0, 0, 0]
+        #  [3, 4, 0, 0]         [0, 0, 6, 7]
+        #  [0, 0, 0, 0]]        [0, 0, 0, 9]]
         leftArray_filled, rightArray_filled =\
             _Cluster._prepArrays(leftArray=leftArray_oriented,
-                                            rightArray=rightArray_oriented,
-                                            leftCoord=leftCoord_oriented,
-                                            rightCoord=rightCoord_oriented)
-
-        #print("left_filled:\n",leftArray_filled)
-        #print("right_filled\n", rightArray_filled)
+                                 rightArray=rightArray_oriented,
+                                 leftCoord=leftCoord_oriented,
+                                 rightCoord=rightCoord_oriented)
 
         # Check for merge conflict
         if array_conflict(leftArray_filled, rightArray_filled):
             return False
 
-
-        # if either of the pieces doesn't have an orientation already,
-        # initialize it to the edge's orientation for that piece
-        #if not hasattr(edge.pieces[0], "orientation"):
-        #    edge.pieces[0].orientation = 0
-        #if not hasattr(edge.pieces[1], "orientation"):
-        #    edge.pieces[1].orientation = 0
-
-        #Rotate the arrays' pieces
+        # Rotate the arrays' pieces
         leftCluster._rotatePieces(rotsLeft)
         rightCluster._rotatePieces(rotsRight)
 
@@ -320,37 +326,14 @@ class _Cluster:
         merged = np.where(leftArray_filled == 0,
                           rightArray_filled, leftArray_filled)
 
-        #print(edge.pieces[0].index)
-        #print(leftCluster.pieceArray)
-
-        #print(edge.dissim)
-
-        #print(edge.pieces[1].index)
-        #print(rightCluster.pieceArray)
-
-        #print(merged)
-        #print()
-        #print()
-        # Delete the right piece's cluster: no longer neccessary as it will be merged
-        #del rightCluster
-
-        #Assign the new merged array as left's cluster
+        # Assign the new merged array as left's cluster
         leftCluster.pieceArray = merged
 
-        #print("merged\n", merged)
-        
-        #Make the newly merged cluster's pieces realise their correct indeces
+        # Make the newly merged cluster's pieces realise
+        # their new cluster and correct indeces.
         leftCluster._updatePieces()
 
-        #edge.pieces[1].cluster = leftCluster
-
-        #print(edge.pieces[1].cluster.pieceArray)
-        
-        #print("orieLeftPiece (%d)" % edge.pieces[0].orientation)
-        #print("orieRightPiece (%d)" % edge.pieces[1].orientation)
-
-        #print()
-
+        # A merge occured, so...
         return True
 
 
@@ -364,7 +347,6 @@ class JigsawTree:
 
         self.pieceLen = pieceLen
 
-        
         self.nullPiece = None
         self.pieces = [self.nullPiece]
         for i in range(self.rows):
@@ -382,42 +364,22 @@ class JigsawTree:
                 for allEdges in piece.edges:
                     allEdges = sorted(allEdges)
                     min2 = allEdges[1]
-                    #TODO ^ for efficienty's sake, make this an algorithm that only finds
-                    #The second minimum instead of sorting everything just for it.
+                    # TODO ^ for efficienty's sake, make this an algorithm that only finds
+                    # The second minimum instead of sorting everything just for it.
                     for edge in allEdges:
                         edge.sift(min2)
                         heapq.heappush(self.edges, edge)
-
-
-
-
         self.pieceCount = len(self.pieces) - 1  # exclude tne nullPiece
         for x in range(1, self.pieceCount + 1):
             _Cluster(self.pieces[x], self.rotatePiece, self.updatePiece)
 
-        
-
-    def showEdges(self):
-        while len(self.edges) > 1000:
-            edge = heapq.heappop(self.edges)
-            p1, p2 = edge.pieces[0], edge.pieces[1]
-            print("Edge weight: %r, piece1: (%d, %d), piece2: (%d, %d)"
-                  % (edge.dissim, p1.coord[0], p1.coord[1], p2.coord[0], p2.coord[1]))
-            print("Rotation: %d, %d" % edge.getOrientation())
-        #TODO finsih up here
-
     def solve(self):
-        #Will be 8*n*(n-1) edges produced
+        # Will be 8*n*(n-1) edges produced
         clusterCount = self.pieceCount
         while clusterCount > 1:
             edge = heapq.heappop(self.edges)
             if _Cluster.potentiallyMerge(edge):
                 clusterCount -= 1
-
-        #for piece in self.pieces:
-        #    if piece is not self.nullPiece:
-        #        print(piece.index)
-        #        print(piece.cluster.pieceArray)
 
     def showPuzzle(self):
         pieceArray = self.pieces[1].cluster.pieceArray
@@ -425,25 +387,21 @@ class JigsawTree:
         size = (shape[1] * self.pieceLen, shape[0] * self.pieceLen)
         solvedIm = Image.new("RGB", size)
 
-        for (i,j), index in np.ndenumerate(pieceArray):
+        for (i, j), index in np.ndenumerate(pieceArray):
             if int(index) == 0:
                 continue
-            inX, inY = int((index - 1) % self.cols) * self.pieceLen, int((index - 1) / self.cols) * self.pieceLen
+            inX = int((index - 1) % self.cols) * self.pieceLen
+            inY = int((index - 1) / self.cols) * self.pieceLen
             data = (inX, inY, inX + self.pieceLen, inY + self.pieceLen)
-            imPiece = self.imIn.transform((self.pieceLen, self.pieceLen), Image.EXTENT, data)
+            imPiece = self.imIn.transform((self.pieceLen, self.pieceLen),
+                                          Image.EXTENT, data)
             numRots = self.pieces[int(index)].orientation
-            #print(numRots)
-            #print(translate_CCW_CW(numRots))
-            #print()
             if numRots:
-                imPiece = imPiece.rotate(90  * numRots)
+                imPiece = imPiece.rotate(90 * numRots)
             solvedCoord = (j * self.pieceLen, i * self.pieceLen)
             solvedIm.paste(imPiece, solvedCoord)
 
-        #print(pieceArray)
         solvedIm.show("Solved Puzzle")
-
-
 
     def rotatePiece(self, index, rotation):
         newOrient = (self.pieces[index].orientation + rotation) % 4
