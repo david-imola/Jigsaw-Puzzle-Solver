@@ -7,7 +7,7 @@ from PuzzleSolve.core import solve
 import numpy
 import os.path as path
 
-pixels = 250
+pixels = 100
 inImage = path.join(path.dirname(__file__), "test.jpeg")
 outImage = "/Volumes/Storage/local/puzzle/testpuzz.png"
 
@@ -15,6 +15,7 @@ outImage = "/Volumes/Storage/local/puzzle/testpuzz.png"
 def test_puzzle():
     with Puzzle() as puzz:
         puzz.create(inImage, outImage, pixels)
+
 
 #@nottest
 def test_solve():
@@ -33,10 +34,12 @@ def test_solve():
 
     solver.showPuzzle()
 
+
 @nottest
 def test_displayEdges():
     solver = solve.JigsawTree(outImage, pixels)
     solver.showEdges()
+
 
 #@nottest
 def test_arrayMerge1():
@@ -68,7 +71,6 @@ def test_arrayMerge2():
     leftCoord = (1, 0)
     rightCoord = (1, 0)
 
-
     shouldLeft = numpy.array([[1, 1, 1, 0], [1, 0, 0, 0], [1, 0, 0, 0]])
     shouldRight = numpy.array([[0, 0, 0, 1], [0, 1, 1, 1], [0, 0, 0, 0]])
 
@@ -78,6 +80,7 @@ def test_arrayMerge2():
     numpy.testing.assert_array_equal(result[0], shouldLeft)
 
     assert not solve.array_conflict(result[0], result[1])
+
 
 def test_arrayMerge3():
     left = [
@@ -101,7 +104,7 @@ def test_arrayMerge3():
     leftCoord = (3, 3)
     rightCoord = (3, 0)
 
-    shouldLeft  = [
+    shouldLeft = [
         [1, 0, 0, 1, 0, 1, 0],
         [1, 0, 0, 1, 1, 1, 0],
         [1, 1, 1, 1, 0, 0, 0],
@@ -125,6 +128,7 @@ def test_arrayMerge3():
     #there is a conflict in this one
     assert solve.array_conflict(result[0], result[1])
 
+
 def test_arrayMerge4():
     leftArray = numpy.array([[1,1,1], [1, 0, 1], [1, 1, 1]])
     rightArray = numpy.array([[1]])
@@ -142,6 +146,7 @@ def test_arrayMerge4():
     numpy.testing.assert_array_equal(result[0] , shouldLeft)
 
     assert not solve.array_conflict(result[0], result[1])
+
 
 def test_arrayMerge5():
     left = [
